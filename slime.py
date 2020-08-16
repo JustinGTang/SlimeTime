@@ -45,6 +45,7 @@ async def on_ready():
 
 @slime.event
 async def on_message(message):
+    global guild
     guild = message.guild
     if(message.author.name != 'SlimeTime'):
         if(message.content == 'lucid?' or message.content == 'lomien?'):
@@ -91,7 +92,8 @@ async def weekly(ctx):
     embed = discord.Embed(colour = discord.Colour.green())
     currentDate = datetime.now()
     displayDay = 2 - int(currentDate.strftime("%w"))
-    if displayDay < 0:  # Calulate days until next wednesday
+    # Calulate days until next wednesday
+    if displayDay < 0:
         displayDay += 6
 
     currentTime = datetime.now().time()
@@ -162,7 +164,8 @@ async def reset(ctx):
     currentDate = datetime.now()
     currentTime = datetime.now().time()
     displayDay = 3 - int(currentDate.strftime("%w"))
-    if displayDay <= 0:  # Calulate days until next wednesday
+    # Calulate days until next wednesday
+    if displayDay <= 0:
         displayDay += 6
     displayHour = 16 - int(currentTime.strftime("%H"))
     displayMin = 60 - int(currentTime.strftime("%M"))
@@ -239,6 +242,9 @@ async def help(ctx, choice = 'None'):
         embed.add_field(name = '-spotify', value = 'Lists the users currently listening to Spotify, as well as the song they are listening to.', inline = False)
         embed.add_field(name = '-song [x]', value = 'Get info on the number [x] song in the currently listening list.', inline = False)
         embed.add_field(name = '-top', value = 'Get your top 10 most listened to songs. Use -top 2 to see page 2.', inline = False)
+        embed.add_field(name = '-artists [x]', value = 'View your top 5 artists, or @someone and see their top 5 artists.', inline = False)
+        embed.add_field(name = '-playcount [x]', value = 'View your total playcount, or @someone and see total playcount.', inline = False)
+        embed.add_field(name = '-leaderboard', value = 'View the top 5 listeners on the server.', inline = False)
         embed.set_footer(text = 'Page 4/5')
     elif choice == 'general':
         embed.set_author(name = 'General Commands', icon_url = 'https://icons.iconarchive.com/icons/paomedia/small-n-flat/1024/cog-icon.png')
@@ -311,18 +317,18 @@ def initSongs():
     for member in guild.members:
             if member.activities:
                 for activity in member.activities:
-                    if activity.name == 'Spotify':  #Find someone listening to music
+                    #Find someone listening to music
+                    if activity.name == 'Spotify':
                         # Update current song dictionary
                         currentSong = users.get(member.name, 0)
-                        if currentSong == 0:    # User not in currently listening dictionary yet
-                            users[member.id] = f'{activity.title}'
-                        elif currentSong != activity.title:     # User is listening to a new song
+                        # User not in currently listening dictionary yet or user is listening to a new song
+                        if currentSong == 0 or currentSong != activity.title:
                             users[member.id] = f'{activity.title}'
 
 @slime.command()
 async def top(ctx, choice = 'None'):
     first = True
-    person = collection.find_one({'_id':f'{ctx.author.name}'})
+    person = collection.find_one({'_id':ctx.author.id})
     songList = person['song']
     songList.sort(key = lambda x: x[2], reverse = True)
     embed = discord.Embed(colour = discord.Colour.green())
@@ -369,13 +375,13 @@ async def artists(ctx, person = 'None'):
         member = ctx.author.id
     else:
         member = int(person.strip('<!@>'))
-        print(member)
     person = collection.find_one({'_id': member})
     songList = person['song']
     for songs in songList:
         artistName = songs[1].split(';')
         playCount = songs[2]
-        if artistName[0] in artists:   # If artist is not in temp dictionary yet
+        # If artist is not in temp dictionary yet
+        if artistName[0] in artists:
             plays = artists[artistName[0]]
             artists[artistName[0]] = plays + playCount
         else:
@@ -398,6 +404,62 @@ async def artists(ctx, person = 'None'):
 
     await ctx.send(embed = embed)
 
+@slime.command()
+async def playcount(ctx, person = 'None'):
+    embed = discord.Embed(colour = discord.Colour.green())
+    if person == 'None':
+        member = ctx.author.id
+    else:
+        member = int(person.strip('<!@>'))
+
+    playCount = findCount(member)
+
+    embed.set_author(name = f'You have a total play count of {playCount}.', icon_url = 'https://www.freepnglogos.com/uploads/spotify-logo-png/spotify-icon-marilyn-scott-0.png')
+    await ctx.send(embed = embed)
+
+@slime.command()
+async def leaderboard(ctx, person = 'None'):
+    global guild
+    embed = discord.Embed(colour = discord.Colour.green())
+    memberCount = {}
+
+    for member in guild.members:
+        count = findCount(member.id)
+        memberCount[member.name] = count
+
+    leaders = sorted(memberCount.items(), key = lambda x: x[1], reverse = True)
+    if len(leaders) <= 5:
+        top5 = len(leaders) - 1
+    else:
+        top5 = 4
+
+    embed.set_author(name = f'The top 5 listeners are: ', icon_url = 'https://www.freepnglogos.com/uploads/spotify-logo-png/spotify-icon-marilyn-scott-0.png')
+    embed.add_field(name = 'Listener', value = leaders[0][0], inline = True)
+    embed.add_field(name = '\u200B', value = '\u200B', inline = True)
+    embed.add_field(name = 'Play Count', value = leaders[0][1], inline = True)
+    for x in range(top5):
+        embed.add_field(name = '\u200B', value = leaders[x + 1][0], inline = True)
+        embed.add_field(name = '\u200B', value = '\u200B', inline = True)
+        embed.add_field(name = '\u200B', value = leaders[x + 1][1], inline = True)
+
+    await ctx.send(embed = embed)
+
+def findCount(personID):
+    global guild
+    embed = discord.Embed(colour = discord.Colour.green())
+    playCount = 0
+
+    for member in guild.members:
+        if personID == member.id:
+                person = collection.find_one({'_id': member.id})
+                # If they have no songs in database
+                if person == None:
+                    return playCount
+
+                songList = person['song']
+                for songs in songList:
+                    playCount += songs[2]
+    return playCount
 
 # GENERAL COMMANDS
 @slime.command()
@@ -471,12 +533,18 @@ async def spotify_tracker():
             if member.activities:
                 for activity in member.activities:
                     if activity.name == 'Spotify':  #Find someone listening to music
-                        if member.id in users:    # If listener is in currently listening list                         
+                        # If listener is in currently listening list
+                        if member.id in users:                        
                             found = False
                             # Database changes
                             if collection.find_one({'_id': member.id}) == None:   # If its a new person
                                 print(f"New Member - {member.name}")
-                                collection.insert_one({'_id': member.id, 'name': f'{member.name}', 'song': [ (f'{activity.title}', f'{activity.artist}', 1) ]})      # List of tuples with song name and play count
+                                collection.insert_one({
+                                    '_id': member.id, 
+                                    'name': f'{member.name}', 
+                                    # List of tuples with song name and play count
+                                    'song': [ (f'{activity.title}', f'{activity.artist}', 1) ]
+                                })      
                             else:
                                 # Check their list of songs
                                 person = collection.find_one({'_id': member.id})
@@ -493,17 +561,18 @@ async def spotify_tracker():
                                                 else:
                                                     empty.append((x[0], x[1], x[2]))
                                             collection.update_one({'_id': member.id}, {'$set':{'song':empty}})
-                                if found == False:  # If the song is not in their list, add it
+                                # If the song is not in their list, add it
+                                if found == False:  
                                     print(f'New song {activity.title} for {member.name}')
                                     song = person['song']
                                     song.append((f'{activity.title}', f'{activity.artist}', 1))
                                     collection.update_one({'_id': member.id}, {'$set':{'name': f'{member.name}', 'song':song}})
-                                # Check dictionary for current song
                                 
                             # Update current song dictionary
                             users[member.id] = f'{activity.title}' 
 
-                        else:   # If not in listnening list, add them
+                        # If not in listnening list, add them
+                        else:
                             users[member.id] = f'{activity.title}' 
 
                        
