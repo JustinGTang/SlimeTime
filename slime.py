@@ -1,5 +1,7 @@
 ''' SlimeTime Dicord Bot'''
 import discord
+from discord import FFmpegPCMAudio
+from discord.utils import get
 from discord.ext import commands, tasks
 import pymongo
 from pymongo import MongoClient
@@ -9,6 +11,9 @@ import random
 import requests
 from bs4 import BeautifulSoup
 import re
+import youtube_dl
+import os
+from os import system
 
 with open('slime_token.txt', 'r') as f:
     TOKEN = f.readline()
@@ -32,19 +37,17 @@ track = False
 guild = None
 maintenance = False
 users = {}
-daily_tasks = ['Ursus', 'Gollux', 'Maple Tour', 'Arcane River Quests', 'Arcane River Jobs', 'Arkarium/Ranmaru', 'Commerci', 'Monster Park']
-weekly_tasks = ['Scrapyard', 'Dark World Tree', 'Lotus', 'Damien', 'Lucid', 'CRA']
 
 #---- EVENTS ----#
 @slime.event
 async def on_ready():
-    embed = discord.Embed(colour = discord.Colour.green())
-    embed.set_author(name = 'Hello, I am SlimeTime! Type -help for a list of commands and toggles! Type -toggle to start all the toggles.')
+    # embed = discord.Embed(colour = discord.Colour.green())
+    # embed.set_author(name = 'Hello, I am SlimeTime! Type -help for a list of commands and toggles! Type -toggle to start all the toggles.')
 
-    guilds = slime.guilds
-    for guild in guilds:
-        channel = guild.text_channels[0]
-        await channel.send(embed = embed)
+    # guilds = slime.guilds
+    # for guild in guilds:
+    #     channel = guild.text_channels[0]
+    #     await channel.send(embed = embed)
 
     await slime.change_presence(activity = discord.Game('Grinding Mesos'))
     maintenance_check.start()
@@ -215,6 +218,8 @@ async def links(ctx):
     embed.add_field(name = 'Legion', value = 'https://ayumilove.net/maplestory-maple-union-guide/', inline = False)
     await ctx.send(embed = embed)
 
+
+
 # CHAT COMMANDS
 @slime.command()
 async def snitch(ctx):
@@ -263,6 +268,8 @@ async def help(ctx, choice = 'None'):
         embed.add_field(name = '-artists [x]', value = 'View your top 5 artists, or @someone and see their top 5 artists.', inline = False)
         embed.add_field(name = '-playcount [x]', value = 'View your total playcount, or @someone and see total playcount.', inline = False)
         embed.add_field(name = '-leaderboard', value = 'View the top 5 listeners on the server.', inline = False)
+        embed.add_field(name = '-play [url]', value = 'Plays the audio of a YouTube url.', inline = False)
+        embed.add_field(name = '-clear', value = 'Stops the audio playing.', inline = False)
         embed.set_footer(text = 'Page 4/5')
     elif choice == 'general':
         embed.set_author(name = 'General Commands', icon_url = 'https://icons.iconarchive.com/icons/paomedia/small-n-flat/1024/cog-icon.png')
@@ -468,6 +475,69 @@ def find_count(personID):
                     play_count += songs[2]
     return play_count
 
+@slime.command()
+async def play(ctx, url = 'None'):
+    global idle_timer
+    idle_timer = 0
+    
+    guild = ctx.message.guild
+    voice_client = guild.voice_client
+    embed = discord.Embed(colour = discord.Colour.green())
+
+    # If the command has a url
+    if ctx.channel.last_message.embeds != []:
+        video_title = ctx.channel.last_message.embeds[0].title
+
+        # If not connect to a voice channel, join
+        if voice_client == None:
+            channel = ctx.author.voice.channel
+            await channel.connect()
+            voice_client = guild.voice_client
+        
+        ydl_opts = {
+            'format': 'bestaudio/best',
+            'postprocessors': [{
+                'key': 'FFmpegExtractAudio',
+                'preferredcodec': 'mp3',
+                'preferredquality': '192',
+            }],
+        }
+        with youtube_dl.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([url])
+
+        # If bot is currently not playing music
+        if voice_client.is_playing() == False:
+            for file in os.listdir('./'):
+                if file.endswith('.mp3'):
+                    song_name = file
+                    os.rename(file, 'current_song.mp3')
+            voice_client.play(discord.FFmpegPCMAudio('current_song.mp3'))
+            embed.set_author(name = f'Now playing: {video_title}')
+            await ctx.send(embed = embed)
+            play_loop.start(guild)
+        # If playing music, queue
+        else:
+            embed.set_author(name = f'Queued: {video_title}')
+            await ctx.send(embed = embed)
+            # Queue songs
+    else:
+        embed.set_author(name = f'Please link a video to play!')
+        await ctx.send(embed = embed)
+
+@slime.command()
+async def clear(ctx):
+    embed = discord.Embed(colour = discord.Colour.green())
+    guild = ctx.message.guild
+    voice_client = guild.voice_client
+    voice_client.stop()
+    await asyncio.sleep(1)
+    for file in os.listdir('./'):
+            if file.endswith('.mp3'):
+                os.remove(file)
+    embed.set_author(name = f'Stopped playing music!')
+    await ctx.send(embed = embed)
+    await ctx.voice_client.disconnect()
+    play_loop.stop()
 
 
 # GENERAL COMMANDS
@@ -502,6 +572,8 @@ async def flip(ctx):
     else:
         embed.set_author(name = 'No')
     await ctx.send(embed = embed)
+
+
 
 #---- TASKS ----#
 @tasks.loop(hours = 1)
@@ -612,6 +684,24 @@ async def maintenance_check():
         await channel.send(embed = embed)
     else:
         print('No server maintenance detected')
+
+@tasks.loop(seconds = 1)
+async def play_loop(guild):
+    global idle_timer
+    idle_timer += 1
+    voice_client = guild.voice_client
+    
+    # Once the song ends
+    if voice_client.is_playing() == False:
+        for file in os.listdir('./'):
+            if file.endswith('.mp3'):
+                os.remove(file)
+
+    # If bot does not get another play command in 10 minutes
+    if idle_timer == 600:
+        idle_timer = 0
+        await ctx.voice_client.disconnect()
+        play_loop.stop()
 
 
 slime.run(TOKEN)
